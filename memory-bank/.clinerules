@@ -1,0 +1,93 @@
+# Azure Resource Mover - Project Intelligence
+
+This file contains specific patterns, preferences, and project intelligence for the Azure Resource Mover project that help me work more effectively.
+
+## Naming Conventions
+
+1. **Resource Name Patterns**:
+   - KeyVault format: `kv-iqonsticos{tenantId}` (no hyphen before tenant ID)
+   - Service Bus format: `sb-iqon-sticos-{tenantId}` (has hyphen before tenant ID)
+   - Web App format: `app-iqon-sticos-{tenantId}` (has hyphen before tenant ID)
+   - Note the inconsistency between KeyVault and other resources (missing hyphen before tenant ID in KeyVault)
+
+2. **Regex Pattern Handling**:
+   - All regex patterns use the `RegexOptions.Compiled | RegexOptions.IgnoreCase` flags for better performance and case insensitivity
+   - Service Bus and Web App patterns include optional hyphens (`-?`) to handle potential naming variations
+   - Tenant ID is always captured in the first regex group for consistent extraction
+
+## Code Organization
+
+1. **Service Pattern**:
+   - Services are instantiated in Program.cs and passed to dependent services via constructor injection
+   - LoggerService is passed to all services for consistent logging
+   - Services follow a naming pattern of `{Purpose}Service` (e.g., AzureResourceService)
+
+2. **Method Organization**:
+   - Public methods represent the service API
+   - Private methods handle implementation details
+   - Async methods use the `Async` suffix and return `Task` or `Task<T>`
+
+## Error Handling
+
+1. **Exception Management**:
+   - All external operations (Azure SDK, PowerShell execution) are wrapped in try-catch blocks
+   - Errors are both logged and added to the ScriptResult
+   - Unhandled exceptions are allowed to propagate to the top level for graceful shutdown
+
+2. **Validation Approach**:
+   - Early validation is preferred (e.g., checking if resource group exists before attempting operations)
+   - Null checks use pattern matching where possible (e.g., `if (targetResourceGroup?.Value == null)`)
+
+## Logging Conventions
+
+1. **Log Levels**:
+   - Information: Normal operational messages
+   - Warning: Non-fatal issues that might need attention
+   - Error: Operation failures
+   - Success: Successful completion of important operations
+   - Verbose: Detailed debugging information (only shown with --verbose flag)
+
+2. **Log Message Format**:
+   - Action-oriented (e.g., "Moving X to Y..." rather than "X will be moved to Y")
+   - Include resource names and identifiers in messages
+   - Use message templates with placeholders rather than string concatenation
+
+## CLI Conventions
+
+1. **Command Structure**:
+   - Commands use hyphenated-lowercase (e.g., move-resources)
+   - Flags use double hyphens (e.g., --dry-run)
+   - Boolean flags don't require values (presence indicates true)
+
+2. **Interactive Pattern**:
+   - MenuSystem is used for interactive mode
+   - Each menu item corresponds to a Script class
+   - Script execution is handled in a consistent way via the Execute method
+
+## Azure Interaction Patterns
+
+1. **Resource Access**:
+   - Prefer using SDK methods for discovery (e.g., GetKeyVaults(), GetServiceBusNamespaces())
+   - Fall back to generic resource enumeration (GetGenericResources()) when permission issues may occur
+   - Filter resources after retrieval rather than using server-side filtering
+
+2. **Authentication Flow**:
+   - Use DefaultAzureCredential for flexible authentication options
+   - Get default subscription as the starting point
+   - Allow selection of alternate subscriptions
+   - Verify resource group existence early
+
+## PowerShell Integration
+
+1. **Command Execution**:
+   - Use PowerShell for resource movements rather than SDK (more reliable)
+   - Capture both standard output and standard error
+   - Check exit code to determine success
+   - Log the full command being executed
+
+## Testing Approach
+
+1. **Testing Strategy**:
+   - Test with dry-run mode first before actual resource moves
+   - Use verbose logging to understand the discovery process
+   - Verify target resource groups before execution

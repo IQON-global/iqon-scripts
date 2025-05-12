@@ -1,14 +1,19 @@
 #!/bin/bash
-# Install prerequisites
-sudo apt-get update && sudo apt-get install -y wget apt-transport-https
 
-# Add Microsoft package repository and install .NET 8 runtime
-wget https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb -O packages-microsoft-prod.deb
-sudo dpkg -i packages-microsoft-prod.deb
-sudo apt-get update
-sudo apt-get install -y dotnet-runtime-8.0
+# Install Azure CLI
+curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
 
-# Optionally, pull your application container/image or do additional configuration here
+# Install PowerShell Core
+if ! command -v pwsh &> /dev/null; then
+    echo "Installing PowerShell Core..."
+    sudo apt update
+    sudo apt install -y wget apt-transport-https software-properties-common
+    wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+    sudo dpkg -i packages-microsoft-prod.deb
+    sudo apt update
+    sudo apt install -y powershell
+    rm packages-microsoft-prod.deb
+else
+    echo "PowerShell Core is already installed."
+fi
 
-# Install EF Core tools
-dotnet tool install --global dotnet-ef
