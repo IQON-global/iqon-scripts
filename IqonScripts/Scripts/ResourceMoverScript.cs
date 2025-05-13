@@ -57,14 +57,35 @@ public class ResourceMoverScript
             // Initialize the resource service
             await resourceService.InitializeAsync(_options.SourceResourceGroup);
             
-            // Discover resources to move, passing the optional target resource group
-            var resourcesToMove = await resourceService.DiscoverResourcesToMoveAsync(_options.TargetResourceGroup);
-            
-            // Apply max items limit if specified
-            if (_options.MaxItems > 0 && resourcesToMove.Count > _options.MaxItems)
+            // Discover resources to move, passing the optional target resource group and tenant ID
+            // When tenant ID is specified, filtering happens during discovery for better performance
+            var resourcesToMove = await resourceService.DiscoverResourcesToMoveAsync(
+                _options.TargetResourceGroup, 
+                _options.TenantId);
+                
+            if (!string.IsNullOrEmpty(_options.TenantId) && resourcesToMove.Count == 0)
             {
-                _loggerService.LogInformation($"Limiting to {_options.MaxItems} resources (out of {resourcesToMove.Count} discovered)");
-                resourcesToMove = resourcesToMove.Take(_options.MaxItems).ToList();
+                _loggerService.LogWarning($"No resources found with tenant ID: {_options.TenantId}");
+                return new ScriptResult
+                {
+                    Success = true,
+                    DryRun = _options.DryRun,
+                    ExecutionTimeMs = stopwatch.ElapsedMilliseconds
+                };
+            }
+            // Apply max items limit only if no specific tenant ID is provided
+            else if (_options.MaxItems > 0 && resourcesToMove.Count > 0)
+            {
+                var resourcesByTenantId = resourcesToMove.GroupBy(r => r.TenantId).ToList();
+                if (resourcesByTenantId.Count > _options.MaxItems)
+                {
+                    var totalResources = resourcesToMove.Count;
+                    _loggerService.LogInformation($"Limiting to resources for {_options.MaxItems} web apps (out of {resourcesByTenantId.Count} discovered)");
+                    resourcesToMove = resourcesByTenantId.Take(_options.MaxItems)
+                                                       .SelectMany(group => group)
+                                                       .ToList();
+                    _loggerService.LogInformation($"Selected {resourcesToMove.Count} out of {totalResources} total resources for moving");
+                }
             }
             
             if (resourcesToMove.Count == 0)

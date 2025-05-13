@@ -74,18 +74,24 @@ public class AzureResourceService
     /// Discovers resources to move in the source resource group
     /// </summary>
     /// <param name="targetResourceGroup">Optional fixed target resource group to use</param>
+    /// <param name="tenantId">Optional specific tenant ID to filter resources by</param>
     /// <returns>A list of resources to move</returns>
-    public async Task<List<ResourceInfo>> DiscoverResourcesToMoveAsync(string? targetResourceGroup = null)
+    public async Task<List<ResourceInfo>> DiscoverResourcesToMoveAsync(string? targetResourceGroup = null, string? tenantId = null)
     {
         var resourcesToMove = new List<ResourceInfo>();
         
         _logger.LogInformation($"Discovering resources in resource group '{_sourceResourceGroup.Data.Name}'...");
         
+        if (tenantId != null)
+        {
+            _logger.LogInformation($"Filtering resources for tenant ID: {tenantId}");
+        }
+        
         // Discover KeyVaults
-        await DiscoverKeyVaultsAsync(resourcesToMove);
+        await DiscoverKeyVaultsAsync(resourcesToMove, tenantId);
         
         // Discover Service Buses
-        await DiscoverServiceBusesAsync(resourcesToMove);
+        await DiscoverServiceBusesAsync(resourcesToMove, tenantId);
         
         // Find target resource groups for each resource
         await FindTargetResourceGroupsAsync(resourcesToMove, targetResourceGroup);
@@ -117,6 +123,19 @@ public class AzureResourceService
         _logger.LogInformation("Moving resources...");
         var startTime = DateTime.UtcNow;
         
+        // Group resources by tenant ID for more informative logging during movement
+        var resourcesByTenantId = resources.GroupBy(r => r.TenantId).ToList();
+        _logger.LogInformation($"Moving resources for {resourcesByTenantId.Count} web apps");
+        
+        foreach (var group in resourcesByTenantId)
+        {
+            var tenantId = group.Key;
+            var resourcesInGroup = group.ToList();
+            
+            _logger.LogInformation($"Moving {resourcesInGroup.Count} resources for web app with tenant ID {tenantId}");
+        }
+        
+        // Process each resource individually for actual movement
         foreach (var resource in resources)
         {
             try
@@ -171,7 +190,7 @@ public class AzureResourceService
     }
 
     /// <summary>
-    /// Moves a resource to a different resource group using the Azure PowerShell cmdlet
+    /// Moves a resource to a different resource group using the Azure SDK
     /// </summary>
     /// <param name="subscriptionId">The subscription ID</param>
     /// <param name="sourceResourceGroup">The source resource group</param>
@@ -186,44 +205,90 @@ public class AzureResourceService
     {
         try
         {
-            // Use PowerShell (via the Azure CLI) to move resources
-            // This is a more reliable method than using the ARM REST API directly
-            var powershellCommand = $"Move-AzResource -ResourceId \"{resourceId}\" -DestinationResourceGroupName \"{targetResourceGroup}\" -Force";
-            var command = $"powershell -Command \"{powershellCommand}\"";
+            _logger.LogVerbose($"Moving resource {resourceId} to {targetResourceGroup} using Azure SDK...");
             
-            // Create process to run PowerShell
-            var process = new System.Diagnostics.Process
+            // Get the subscription
+            var subscription = _armClient.GetDefaultSubscription();
+            
+            // Get source and target resource groups
+            var sourceRG = await subscription.GetResourceGroupAsync(sourceResourceGroup);
+            var targetRG = await subscription.GetResourceGroupAsync(targetResourceGroup);
+            
+            if (sourceRG == null || sourceRG.Value == null)
             {
-                StartInfo = new System.Diagnostics.ProcessStartInfo
-                {
-                    FileName = "powershell.exe",
-                    Arguments = $"-Command \"{powershellCommand}\"",
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true
-                }
-            };
-            
-            _logger.LogVerbose($"Executing PowerShell command: {powershellCommand}");
-            
-            process.Start();
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var error = await process.StandardError.ReadToEndAsync();
-            await process.WaitForExitAsync();
-            
-            if (process.ExitCode != 0)
-            {
-                _logger.LogError($"PowerShell command failed with exit code {process.ExitCode}: {error}");
+                _logger.LogError($"Source resource group {sourceResourceGroup} not found");
                 return false;
             }
             
-            _logger.LogVerbose($"PowerShell command output: {output}");
-            return true;
+            if (targetRG == null || targetRG.Value == null)
+            {
+                _logger.LogError($"Target resource group {targetResourceGroup} not found");
+                return false;
+            }
+            
+            try
+            {
+                _logger.LogVerbose($"Moving resource using ResourceGroup.MoveResourcesAsync method");
+                
+                // Create move content object with resource IDs to move
+                var moveContent = new Azure.ResourceManager.Resources.Models.ResourcesMoveContent
+                {
+                    Resources = { resourceId },
+                    TargetResourceGroup = targetRG.Value.Id
+                };
+                
+                // Move the resource(s)
+                var moveOperation = await sourceRG.Value.MoveResourcesAsync(
+                    WaitUntil.Completed, 
+                    moveContent);
+                
+                _logger.LogVerbose("Resource move operation completed successfully");
+                return true;
+            }
+            catch (RequestFailedException ex)
+            {
+                _logger.LogError($"Azure SDK request failed: {ex.Message} (Status: {ex.Status})", ex);
+                
+                // Try alternative approach if first attempt fails
+                try
+                {
+                    _logger.LogVerbose("Attempting alternative approach using ArmClient.GetGenericResource...");
+                    
+                    // Try getting the resource directly using ArmClient
+                    var resourceIdentifier = new ResourceIdentifier(resourceId);
+                    var resource = _armClient.GetGenericResource(resourceIdentifier);
+                    
+                    if (resource == null)
+                    {
+                        _logger.LogError($"Resource {resourceId} not found using direct method");
+                        return false;
+                    }
+                    
+                    // Create move content with this single resource
+                    var moveContent = new Azure.ResourceManager.Resources.Models.ResourcesMoveContent
+                    {
+                        Resources = { resourceId },
+                        TargetResourceGroup = targetRG.Value.Id
+                    };
+                    
+                    // Try moving via the source resource group
+                    var moveOperation = await sourceRG.Value.MoveResourcesAsync(
+                        WaitUntil.Completed, 
+                        moveContent);
+                    
+                    _logger.LogVerbose("Alternative move operation completed successfully");
+                    return true;
+                }
+                catch (Exception innerEx)
+                {
+                    _logger.LogError($"Alternative move approach also failed: {innerEx.Message}", innerEx);
+                    return false;
+                }
+            }
         }
         catch (Exception ex)
         {
-            _logger.LogError($"Failed to move resource: {ex.Message}", ex);
+            _logger.LogError($"Failed to move resource using Azure SDK: {ex.Message}", ex);
             return false;
         }
     }
@@ -252,7 +317,8 @@ public class AzureResourceService
     /// Finds KeyVaults in the source resource group
     /// </summary>
     /// <param name="resources">The list to add found resources to</param>
-    private async Task DiscoverKeyVaultsAsync(List<ResourceInfo> resources)
+    /// <param name="specificTenantId">Optional specific tenant ID to filter by</param>
+    private async Task DiscoverKeyVaultsAsync(List<ResourceInfo> resources, string? specificTenantId = null)
     {
         _logger.LogInformation($"Looking for KeyVaults in resource group '{_sourceResourceGroup.Data.Name}'...");
         _logger.LogInformation($"Using KeyVault pattern: {_keyVaultTenantIdRegex}");
@@ -270,19 +336,27 @@ public class AzureResourceService
             keyVaultCount++;
             _logger.LogInformation($"Found KeyVault: {vault.Data.Name}");
             
-            string tenantId = ExtractTenantId(vault.Data.Name, _keyVaultTenantIdRegex);
-            if (tenantId != null)
+            string extractedTenantId = ExtractTenantId(vault.Data.Name, _keyVaultTenantIdRegex);
+            
+            // Skip if a specific tenant ID is provided and this resource doesn't match
+            if (specificTenantId != null && extractedTenantId != specificTenantId)
+            {
+                _logger.LogInformation($"Skipping KeyVault {vault.Data.Name} as it doesn't match the specified tenant ID: {specificTenantId}");
+                continue;
+            }
+            
+            if (extractedTenantId != null)
             {
                 resources.Add(new ResourceInfo
                 {
                     Id = vault.Id,
                     Name = vault.Data.Name,
                     Type = "KeyVault",
-                    TenantId = tenantId,
+                    TenantId = extractedTenantId,
                     SourceResourceGroup = _sourceResourceGroup.Data.Name
                 });
                 
-                _logger.LogInformation($"Found KeyVault: {vault.Data.Name} with tenant ID: {tenantId}");
+                _logger.LogInformation($"Found KeyVault: {vault.Data.Name} with tenant ID: {extractedTenantId}");
             }
             else
             {
@@ -300,7 +374,8 @@ public class AzureResourceService
     /// Finds Service Buses in the source resource group
     /// </summary>
     /// <param name="resources">The list to add found resources to</param>
-    private async Task DiscoverServiceBusesAsync(List<ResourceInfo> resources)
+    /// <param name="specificTenantId">Optional specific tenant ID to filter by</param>
+    private async Task DiscoverServiceBusesAsync(List<ResourceInfo> resources, string? specificTenantId = null)
     {
         _logger.LogInformation($"Looking for Service Buses in resource group '{_sourceResourceGroup.Data.Name}'...");
         _logger.LogInformation($"Using Service Bus pattern: {_serviceBusTenantIdRegex}");
@@ -318,19 +393,27 @@ public class AzureResourceService
             serviceBusCount++;
             _logger.LogInformation($"Found Service Bus: {serviceBus.Data.Name}");
             
-            string tenantId = ExtractTenantId(serviceBus.Data.Name, _serviceBusTenantIdRegex);
-            if (tenantId != null)
+            string extractedTenantId = ExtractTenantId(serviceBus.Data.Name, _serviceBusTenantIdRegex);
+            
+            // Skip if a specific tenant ID is provided and this resource doesn't match
+            if (specificTenantId != null && extractedTenantId != specificTenantId)
+            {
+                _logger.LogInformation($"Skipping Service Bus {serviceBus.Data.Name} as it doesn't match the specified tenant ID: {specificTenantId}");
+                continue;
+            }
+            
+            if (extractedTenantId != null)
             {
                 resources.Add(new ResourceInfo
                 {
                     Id = serviceBus.Id,
                     Name = serviceBus.Data.Name,
                     Type = "ServiceBus",
-                    TenantId = tenantId,
+                    TenantId = extractedTenantId,
                     SourceResourceGroup = _sourceResourceGroup.Data.Name
                 });
                 
-                _logger.LogInformation($"Found Service Bus: {serviceBus.Data.Name} with tenant ID: {tenantId}");
+                _logger.LogInformation($"Found Service Bus: {serviceBus.Data.Name} with tenant ID: {extractedTenantId}");
             }
             else
             {
@@ -397,16 +480,20 @@ public class AzureResourceService
         
         // Group resources by tenant ID
         var resourcesByTenantId = resources.GroupBy(r => r.TenantId);
+        _logger.LogInformation($"Found {resourcesByTenantId.Count()} tenant IDs (web apps) with resources to move");
         
         foreach (var group in resourcesByTenantId)
         {
             var tenantId = group.Key;
+            var resourcesInGroup = group.ToList();
             
             if (string.IsNullOrEmpty(tenantId))
             {
                 _logger.LogWarning($"Skipping resources with no tenant ID");
                 continue;
             }
+            
+            _logger.LogInformation($"Tenant ID: {tenantId} has {resourcesInGroup.Count} resources: {string.Join(", ", resourcesInGroup.Select(r => $"{r.Name} ({r.Type})"))}");
             
             // Look for resource groups with web apps matching the tenant ID pattern
             var webAppResourceGroupName = string.Empty;

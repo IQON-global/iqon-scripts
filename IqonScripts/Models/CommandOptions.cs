@@ -25,6 +25,12 @@ public class CommandOptions
     public int MaxItems { get; set; } = 0;
     
     /// <summary>
+    /// Specific tenant ID to filter resources by
+    /// If specified, only resources for this tenant ID will be included
+    /// </summary>
+    public string? TenantId { get; set; }
+    
+    /// <summary>
     /// Whether to run in dry run mode (preview only)
     /// </summary>
     public bool DryRun { get; set; } = false;

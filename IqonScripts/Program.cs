@@ -65,6 +65,11 @@ class Program
             { IsRequired = false };
         targetGroupOption.SetDefaultValue("rg-iqon-sticos-2");
 
+        var tenantIdOption = new Option<string>(
+            new string[] { "--tenant-id", "-id" },
+            description: "Filter resources by specific tenant ID") 
+            { IsRequired = false };
+        
         var maxItemsOption = new Option<int>(
             new string[] { "--max-items", "-m" },
             description: "Maximum number of resources to move (for testing, 0 means no limit)") 
@@ -86,12 +91,13 @@ class Program
         command.AddOption(subscriptionOption);
         command.AddOption(sourceGroupOption);
         command.AddOption(targetGroupOption);
+        command.AddOption(tenantIdOption);
         command.AddOption(maxItemsOption);
         command.AddOption(dryRunOption);
         command.AddOption(verboseOption);
 
         // Set the handler
-        command.SetHandler(async (string subscriptionId, string sourceGroup, string targetGroup, int maxItems, bool dryRun, bool verbose) =>
+        command.SetHandler(async (string subscriptionId, string sourceGroup, string targetGroup, string tenantId, int maxItems, bool dryRun, bool verbose) =>
         {
             // Create the logger
             var loggerFactory = LoggerFactory.Create(builder =>
@@ -110,6 +116,7 @@ class Program
                     SubscriptionId = subscriptionId,
                     SourceResourceGroup = sourceGroup,
                     TargetResourceGroup = targetGroup,
+                    TenantId = tenantId,
                     MaxItems = maxItems,
                     DryRun = dryRun,
                     Verbose = verbose,
@@ -128,7 +135,7 @@ class Program
                 logger.LogError(ex, "An unhandled exception occurred");
                 Environment.ExitCode = 1;
             }
-        }, subscriptionOption, sourceGroupOption, targetGroupOption, maxItemsOption, dryRunOption, verboseOption);
+        }, subscriptionOption, sourceGroupOption, targetGroupOption, tenantIdOption, maxItemsOption, dryRunOption, verboseOption);
 
         return command;
     }

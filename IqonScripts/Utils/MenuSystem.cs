@@ -121,11 +121,31 @@ public class MenuSystem
             Console.WriteLine($"Using default subscription ID: {DefaultSubscriptionId}");
         }
         
+        // First, check if user wants to filter by tenant ID
+        var tenantIdOption = selectedCommand.Options.FirstOrDefault(o => o.Name == "tenant-id");
+        string tenantId = null;
+        if (tenantIdOption != null)
+        {
+            string prompt = "Filter resources by specific tenant ID (leave empty to get all): ";
+            tenantId = GetStringInput(prompt, "");
+            
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                arguments.Add("--tenant-id");
+                arguments.Add(tenantId);
+                Console.WriteLine($"Will only process resources for tenant ID: {tenantId}");
+            }
+        }
+        
         // Process each option
         foreach (var option in selectedCommand.Options)
         {
-            // Skip help option and subscription option (already handled)
-            if (option.Name == "help" || option.Name == "subscription-id")
+            // Skip help option, subscription option (already handled), and tenant ID (already handled)
+            if (option.Name == "help" || option.Name == "subscription-id" || option.Name == "tenant-id")
+                continue;
+                
+            // Skip max-items option if tenant ID is provided
+            if (option.Name == "max-items" && !string.IsNullOrEmpty(tenantId))
                 continue;
                 
             // Handle different option types
