@@ -236,6 +236,11 @@ public class KeyVaultAccessPolicyScript
                 SourceResourceGroup = kv.ResourceGroup
             }).ToList()
         };
+
+        // Counters for summary statistics
+        int policiesAlreadyExist = 0;
+        int policiesNeeded = 0;
+        int policiesAdded = 0;
         
         _loggerService.LogInformation($"Updating access policies on {keyVaults.Count} key vaults...");
         
@@ -264,7 +269,57 @@ public class KeyVaultAccessPolicyScript
                     continue;
                 }
                 
-                _loggerService.LogVerbose($"Using REST API to update access policy");
+                _loggerService.LogVerbose($"First checking if access policy already exists");
+                
+                // Get the current key vault configuration to check existing policies
+                string getVaultUrl = $"https://management.azure.com/subscriptions/{keyVault.SubscriptionId}/resourceGroups/{keyVault.ResourceGroup}/providers/Microsoft.KeyVault/vaults/{keyVault.Name}?api-version={ApiVersion}";
+                
+                // Create HTTP request to get key vault
+                var getRequest = new HttpRequestMessage(HttpMethod.Get, getVaultUrl);
+                getRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken.Token);
+                
+                // Send the request
+                _loggerService.LogVerbose($"Sending request to {getVaultUrl}");
+                var getResponse = await _httpClient.SendAsync(getRequest);
+                
+                if (!getResponse.IsSuccessStatusCode)
+                {
+                    string errorContent = await getResponse.Content.ReadAsStringAsync();
+                    _loggerService.LogError($"Failed to get key vault {keyVault.Name}: {getResponse.StatusCode} - {errorContent}");
+                    result.Errors.Add($"Failed to get key vault {keyVault.Name}: {getResponse.StatusCode} - {errorContent}");
+                    result.Success = false;
+                    continue;
+                }
+                
+                // Parse the response to get the current access policies
+                string vaultContent = await getResponse.Content.ReadAsStringAsync();
+                var vaultJson = JsonDocument.Parse(vaultContent);
+                var accessPoliciesElement = vaultJson.RootElement
+                    .GetProperty("properties")
+                    .GetProperty("accessPolicies");
+                
+                // Check if the Object ID already exists in any access policy
+                bool policyExists = false;
+                foreach (var policy in accessPoliciesElement.EnumerateArray())
+                {
+                    if (policy.TryGetProperty("objectId", out var policyObjectId) && 
+                        policyObjectId.GetString().Equals(objectId, StringComparison.OrdinalIgnoreCase))
+                    {
+                        policyExists = true;
+                        break;
+                    }
+                }
+                
+                if (policyExists)
+                {
+                    _loggerService.LogInformation($"Access policy for Object ID {objectId} already exists in key vault {keyVault.Name} - skipping");
+                    policiesAlreadyExist++;
+                    continue;
+                }
+                
+                policiesNeeded++;
+                
+                _loggerService.LogVerbose($"Access policy doesn't exist yet - adding new policy");
                 
                 // Create access policy request
                 string apiUrl = $"https://management.azure.com/subscriptions/{keyVault.SubscriptionId}/resourceGroups/{keyVault.ResourceGroup}/providers/Microsoft.KeyVault/vaults/{keyVault.Name}/accessPolicies/add?api-version={ApiVersion}";
@@ -317,6 +372,7 @@ public class KeyVaultAccessPolicyScript
                 if (response.IsSuccessStatusCode)
                 {
                     _loggerService.LogSuccess($"Successfully added access policy to key vault {keyVault.Name}");
+                    policiesAdded++;
                 }
                 else
                 {
@@ -333,6 +389,18 @@ public class KeyVaultAccessPolicyScript
                 result.Success = false;
             }
         }
+        
+        // Add the statistics to the result
+        var stats = $"{policiesAdded} of {policiesNeeded} access policies added successfully. " +
+                   $"{policiesAlreadyExist} key vaults already had the access policy.";
+        
+        if (isDryRun)
+        {
+            stats = $"Would add access policy to {policiesNeeded} key vaults. " +
+                   $"{policiesAlreadyExist} key vaults already have the access policy.";
+        }
+        
+        _loggerService.LogInformation(stats);
         
         return result;
     }
