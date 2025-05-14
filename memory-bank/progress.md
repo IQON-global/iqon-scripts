@@ -1,4 +1,4 @@
-# Azure Resource Mover - Progress
+# Azure Resource Management Tools - Progress
 
 ## What Works
 
@@ -36,7 +36,9 @@ The Azure Resource Mover application currently has the following functional comp
 
 ## Current Status
 
-The application is **functional** and can:
+### Azure Resource Mover
+
+The Resource Mover application is **functional** and can:
 
 - Authenticate with Azure
 - List available subscriptions
@@ -51,6 +53,25 @@ The core code modifications we've made include:
 1. Enhanced resource discovery methods in `AzureResourceService` to use generic resource enumeration as a fallback
 2. Improved regex patterns to handle naming variations
 3. Added comprehensive logging throughout the discovery and movement process
+
+### Azure DevOps Release Agent Pool Updater
+
+The Release Agent Pool Updater script is **functional** and can:
+
+- Authenticate with Azure DevOps using Azure AD
+- Find release definitions matching the pattern "iqon-sticos-{tenantId}"
+- Extract tenant IDs from release definition names
+- Update the Agent Pool to "Iqon Sticos VMSS 2" for matching releases
+- Support filtering by specific tenant ID
+- Execute in dry-run mode to preview changes without applying them
+- Provide detailed logging of all operations
+
+The implementation includes:
+
+1. `AzureDevOpsService` using REST APIs to interact with Azure DevOps
+2. `ReleaseAgentPoolUpdaterScript` to orchestrate the update process
+3. Command line interface with options matching the existing structure
+4. Integration with the existing logging and authentication framework
 
 ## Known Issues
 

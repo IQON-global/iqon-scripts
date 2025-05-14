@@ -1,8 +1,12 @@
-# Azure Resource Mover - Active Context
+# Azure Resource Management Tools - Active Context
 
 ## Current Focus
 
-We have developed an Azure Resource Mover application that addresses a specific problem in Azure resource management: when web apps are moved to new resource groups, associated resources like KeyVaults and Service Buses can be left behind in the original resource groups. This disconnection causes deployment failures when scripts attempt to update apps but can't find expected resources in the same resource group.
+We have developed two primary tools for Azure resource management:
+
+### 1. Azure Resource Mover
+
+Addresses a specific problem in Azure resource management: when web apps are moved to new resource groups, associated resources like KeyVaults and Service Buses can be left behind in the original resource groups. This disconnection causes deployment failures when scripts attempt to update apps but can't find expected resources in the same resource group.
 
 The application implements a robust solution that:
 
@@ -10,6 +14,17 @@ The application implements a robust solution that:
 2. Matches them to web apps via tenant ID extraction
 3. Identifies target resource groups where the web apps reside
 4. Moves resources to reunite them with their web apps
+
+### 2. Azure DevOps Release Agent Pool Updater
+
+Addresses the need to update Agent Pools for Azure DevOps release definitions that follow a specific naming pattern. This tool allows DevOps engineers to easily update the Agent Pool configuration across multiple release definitions, ensuring consistent deployment environments.
+
+The script implements a solution that:
+
+1. Connects to Azure DevOps using Azure AD authentication
+2. Finds release definitions matching the pattern "iqon-sticos-{tenantId}"
+3. Updates the Agent Pool to "Iqon Sticos VMSS 2" for all matching releases
+4. Provides detailed logging and supports dry-run mode for testing
 
 ## Implementation Status
 

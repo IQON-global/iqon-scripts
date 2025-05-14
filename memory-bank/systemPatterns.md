@@ -1,18 +1,27 @@
-# Azure Resource Mover - System Patterns
+# Azure Resource Management Tools - System Patterns
 
 ## Architecture Overview
 
-The Azure Resource Mover follows a service-oriented architecture with clear separation of concerns. The application is structured as follows:
+The application follows a service-oriented architecture with clear separation of concerns. The application is structured as follows:
 
 ```mermaid
 flowchart TD
     Program[Program.cs] --> MenuSystem[MenuSystem]
-    MenuSystem --> Scripts[ResourceMoverScript]
-    Scripts --> Services[AzureResourceService]
-    Services --> AzureSDK[Azure SDK]
-    Services --> PowerShell[PowerShell Execution]
-    Services --> Logger[LoggerService]
-    Services --> Auth[AzureAuthenticationService]
+    MenuSystem --> ResourceMoverScript[ResourceMoverScript]
+    MenuSystem --> ReleaseAgentPoolUpdater[ReleaseAgentPoolUpdaterScript]
+    
+    ResourceMoverScript --> AzureResourceService[AzureResourceService]
+    AzureResourceService --> AzureSDK[Azure SDK]
+    AzureResourceService --> PowerShell[PowerShell Execution]
+    
+    ReleaseAgentPoolUpdater --> AzureDevOpsService[AzureDevOpsService]
+    AzureDevOpsService --> RestAPI[Azure DevOps REST API]
+    
+    ResourceMoverScript --> Logger[LoggerService]
+    ReleaseAgentPoolUpdater --> Logger
+    
+    ResourceMoverScript --> Auth[AzureAuthenticationService]
+    ReleaseAgentPoolUpdater --> Auth
 ```
 
 ## Key Design Patterns
@@ -99,12 +108,47 @@ The application implements verbose, multi-level logging that:
 - Records both successes and failures
 - Makes the tool behavior transparent to users
 
+## Azure DevOps Release Agent Pool Updater Patterns
+
+### 1. REST API Client Pattern
+The Azure DevOps Release Agent Pool Updater uses a REST API client pattern instead of the SDK:
+
+- **Direct HTTP Requests**: Uses HttpClient for direct REST API calls
+- **JSON Serialization/Deserialization**: Parses and manipulates JSON responses
+- **Authentication Headers**: Passes Azure AD tokens via Authorization headers
+
+This approach was chosen because:
+- It provides more flexibility with the latest API versions
+- It avoids compatibility issues with the Azure DevOps SDK
+- It allows for more direct control over request/response handling
+
+### 2. JSON Document Transformation
+The updater uses a pattern of JSON document transformation for modifying release definitions:
+
+- **Read**: Fetch the complete JSON document representing a release definition
+- **Transform**: Modify specific nodes (agent pool name) while preserving the structure
+- **Write**: Post the modified document back to the API
+
+This approach ensures:
+- Minimal changes to the document structure
+- Preservation of all existing configuration
+- Reliable updates even with complex document structures
+
+### 3. Operation Batching
+The updater implements operation batching by:
+
+- **Discovery Phase**: First finds all matching release definitions
+- **Validation Phase**: Validates that the agent pool exists before attempting updates
+- **Update Phase**: Processes updates in series with detailed logging
+- **Summary Phase**: Provides aggregated results of the operation
+
 ## Error Handling Strategy
 
-The application implements a robust error handling approach:
+Both tools implement a robust error handling approach:
 
 1. **Try-Catch Blocks**: Around all external operations
 2. **Error Collection**: Aggregation of all errors in the ScriptResult
-3. **Warning Generation**: For non-fatal issues (like missing resources)
+3. **Warning Generation**: For non-fatal issues (like missing resources or non-existent agent pools)
 4. **Graceful Degradation**: Continuing operation when possible despite errors
 5. **Detailed Error Messages**: Including both user-friendly and technical details
+6. **Validation Before Execution**: Checking prerequisites before making changes

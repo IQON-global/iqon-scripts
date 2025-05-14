@@ -28,6 +28,10 @@ class Program
         // Add the move-resources command
         var moveResourcesCommand = CreateMoveResourcesCommand();
         rootCommand.AddCommand(moveResourcesCommand);
+        
+        // Add the update-release-agent-pools command
+        var updateReleaseAgentPoolsCommand = CreateUpdateReleaseAgentPoolsCommand();
+        rootCommand.AddCommand(updateReleaseAgentPoolsCommand);
 
         // If no arguments provided, show the interactive menu
         if (args.Length == 0)
@@ -38,6 +42,97 @@ class Program
         
         // Otherwise, parse the command line arguments and execute the command
         return await rootCommand.InvokeAsync(args);
+    }
+
+    /// <summary>
+    /// Creates the update-release-agent-pools command
+    /// </summary>
+    private static Command CreateUpdateReleaseAgentPoolsCommand()
+    {
+        var command = new Command("update-release-agent-pools", "Update Agent Pools in Azure DevOps release definitions");
+
+        // Add options
+        var subscriptionOption = new Option<string>(
+            new string[] { "--subscription-id", "-i" },
+            description: "Azure subscription ID") 
+            { IsRequired = false };
+
+        var tenantIdOption = new Option<string>(
+            new string[] { "--tenant-id", "-id" },
+            description: "Filter releases by specific tenant ID") 
+            { IsRequired = false };
+        
+        var maxItemsOption = new Option<int>(
+            new string[] { "--max-items", "-m" },
+            description: "Maximum number of releases to update (for testing, 0 means no limit)") 
+            { IsRequired = false };
+        maxItemsOption.SetDefaultValue(0);
+        
+        var dryRunOption = new Option<bool>(
+            new string[] { "--dry-run", "-d" },
+            description: "Run in dry run mode (no changes will be made)") 
+            { IsRequired = false };
+        dryRunOption.SetDefaultValue(false);
+
+        var verboseOption = new Option<bool>(
+            new string[] { "--verbose", "-v" },
+            description: "Enable verbose logging") 
+            { IsRequired = false };
+        verboseOption.SetDefaultValue(false);
+        
+        var patOption = new Option<string>(
+            new string[] { "--pat", "-p" },
+            description: "Personal Access Token (PAT) for Azure DevOps authentication")
+            { IsRequired = false };
+
+        command.AddOption(subscriptionOption);
+        command.AddOption(tenantIdOption);
+        command.AddOption(maxItemsOption);
+        command.AddOption(dryRunOption);
+        command.AddOption(verboseOption);
+        command.AddOption(patOption);
+
+        // Set the handler
+        command.SetHandler(async (string subscriptionId, string tenantId, int maxItems, bool dryRun, bool verbose, string pat) =>
+        {
+            // Create the logger
+            var loggerFactory = LoggerFactory.Create(builder =>
+            {
+                builder
+                    .AddConsole()
+                    .SetMinimumLevel(verbose ? LogLevel.Debug : LogLevel.Information);
+            });
+            var logger = loggerFactory.CreateLogger<Program>();
+
+            try
+            {
+                // Create command options
+                var options = new CommandOptions
+                {
+                    SubscriptionId = subscriptionId,
+                    TenantId = tenantId,
+                    MaxItems = maxItems,
+                    DryRun = dryRun,
+                    Verbose = verbose,
+                    Pat = pat,
+                    ScriptType = "update-release-agent-pools"
+                };
+
+                // Create and run the script
+                var script = new ReleaseAgentPoolUpdaterScript(options, logger);
+                var result = await script.RunAsync();
+
+                // Return success or failure
+                Environment.ExitCode = result.Success ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An unhandled exception occurred");
+                Environment.ExitCode = 1;
+            }
+        }, subscriptionOption, tenantIdOption, maxItemsOption, dryRunOption, verboseOption, patOption);
+
+        return command;
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-# Azure Resource Mover - Technical Context
+# Azure Resource Management Tools - Technical Context
 
 ## Development Environment
 
@@ -10,6 +10,31 @@ The Azure Resource Mover is built as a .NET 9 console application, leveraging th
 - **Project Structure**: Standard .NET SDK project format
 
 ## Core Technologies
+
+### Azure DevOps REST API Integration
+
+The Azure DevOps Release Agent Pool Updater script uses direct REST API calls to interact with Azure DevOps:
+
+- **HttpClient**: For making HTTP requests to the Azure DevOps API endpoints
+- **System.Text.Json**: For JSON serialization and deserialization
+- **JsonDocument**: For parsing and manipulating complex JSON structures
+- **REST API Endpoints**:
+  - `/release/definitions` for listing release definitions
+  - `/release/definitions/{id}` for getting and updating specific release definitions
+  - `/distributedtask/pools` for listing agent pools
+
+This approach was chosen instead of using the Azure DevOps SDK because:
+- It offers more flexibility with API versions
+- It avoids compatibility issues with .NET 9
+- It provides more direct control over the request/response cycle
+
+### Azure AD Authentication for Azure DevOps
+
+The Azure DevOps integration uses Azure AD authentication:
+
+- Uses `DefaultAzureCredential` from Azure.Identity
+- Requests a token with the Azure DevOps resource scope (`499b84ac-1321-427f-aa17-267ca6975798/.default`)
+- Passes the token via the Authorization header with Bearer scheme
 
 ### Azure SDK for .NET
 
@@ -96,6 +121,8 @@ These models use standard C# features like:
 
 ## Development Constraints
 
+### Resource Mover Constraints
+
 - **Permissions**: The application requires appropriate Azure RBAC permissions to:
   - Read resources from source resource groups
   - Write to target resource groups
@@ -107,3 +134,19 @@ These models use standard C# features like:
   - Active internet connection
   - Valid Azure credentials
   - Access to required Azure subscriptions
+
+### Azure DevOps Release Agent Pool Updater Constraints
+
+- **Permissions**: The application requires appropriate permissions to:
+  - Read release definitions in Azure DevOps projects
+  - Update release definitions in Azure DevOps projects
+  - List agent pools in Azure DevOps projects
+
+- **Azure AD Configuration**: The Azure AD tenant must be properly configured:
+  - OAuth2 permissions for Azure DevOps must be granted to the application
+  - The user or service principal must have sufficient rights in Azure DevOps
+
+- **Azure DevOps Organization**: 
+  - The organization URL must be accessible
+  - The project must exist and contain release definitions
+  - The target agent pool "Iqon Sticos VMSS 2" must exist

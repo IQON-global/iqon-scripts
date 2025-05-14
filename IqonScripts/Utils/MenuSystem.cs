@@ -137,11 +137,32 @@ public class MenuSystem
             }
         }
         
+        // Special handling for PAT for update-release-agent-pools command
+        var patOption = selectedCommand.Options.FirstOrDefault(o => o.Name == "pat");
+        string pat = null;
+        if (patOption != null && selectedCommand.Name == "update-release-agent-pools")
+        {
+            string prompt = "Enter Personal Access Token (PAT) for Azure DevOps authentication (leave empty to use demo mode): ";
+            pat = GetStringInput(prompt, "");
+            
+            if (!string.IsNullOrEmpty(pat))
+            {
+                arguments.Add("--pat");
+                arguments.Add(pat);
+                Console.WriteLine("Using provided Personal Access Token for authentication.");
+            }
+            else
+            {
+                Console.WriteLine("No PAT provided. Using demo mode with mock data.");
+            }
+            Console.WriteLine();
+        }
+        
         // Process each option
         foreach (var option in selectedCommand.Options)
         {
-            // Skip help option, subscription option (already handled), and tenant ID (already handled)
-            if (option.Name == "help" || option.Name == "subscription-id" || option.Name == "tenant-id")
+            // Skip help option, subscription option (already handled), tenant ID (already handled), and PAT (already handled)
+            if (option.Name == "help" || option.Name == "subscription-id" || option.Name == "tenant-id" || option.Name == "pat")
                 continue;
                 
             // Skip max-items option if tenant ID is provided

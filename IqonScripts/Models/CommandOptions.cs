@@ -41,6 +41,11 @@ public class CommandOptions
     public bool Verbose { get; set; } = false;
     
     /// <summary>
+    /// Personal Access Token (PAT) for Azure DevOps authentication
+    /// </summary>
+    public string? Pat { get; set; }
+    
+    /// <summary>
     /// The type of script to run
     /// </summary>
     public string ScriptType { get; set; } = "move-resources";
