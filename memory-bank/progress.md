@@ -2,12 +2,13 @@
 
 ## What Works
 
-The Azure Resource Mover application currently has the following functional components:
+The Azure Resource Management Tools currently have the following functional components:
 
 1. **Resource Discovery**:
    - ✅ KeyVault discovery with tenant ID extraction
    - ✅ Service Bus discovery with tenant ID extraction
    - ✅ Fallback to generic resource discovery when type-specific APIs have permission issues
+   - ✅ Resource group filtering based on naming patterns
    - ✅ Comprehensive logging of discovered resources
 
 2. **Resource Matching**:
@@ -16,11 +17,12 @@ The Azure Resource Mover application currently has the following functional comp
    - ✅ Web app matching based on tenant ID
    - ✅ Target resource group identification
 
-3. **Resource Movement**:
+3. **Resource Management**:
    - ✅ Dry-run mode for testing without actual changes
    - ✅ PowerShell-based resource movement for reliability
-   - ✅ Error handling for movement operations
-   - ✅ Movement result reporting
+   - ✅ PowerShell-based access policy management for reliability
+   - ✅ Error handling for all operations
+   - ✅ Detailed result reporting
 
 4. **Command Line Interface**:
    - ✅ Command arguments processing
@@ -73,22 +75,42 @@ The implementation includes:
 3. Command line interface with options matching the existing structure
 4. Integration with the existing logging and authentication framework
 
+### Azure Key Vault Access Policy Updater
+
+The Key Vault Access Policy Updater script is **functional** and can:
+
+- Authenticate with Azure
+- Discover key vaults across resource groups matching "rg-iqon-sticos(-\d+)?"
+- Find key vaults matching the pattern "kv-iqonsticos{tenantId}"
+- Filter key vaults by specific tenant ID
+- Add access policies with configurable permission levels
+- Execute in dry-run mode to preview changes without applying them
+- Provide detailed logging of all operations
+
+The implementation includes:
+
+1. `KeyVaultAccessPolicyScript` to orchestrate the discovery and update process
+2. PowerShell command integration for reliable access policy updates
+3. Configurable access levels (SecretsReadOnly, SecretsReadWrite, CertificatesReadOnly, KeysReadOnly, FullAccess)
+4. Command line interface with options matching the existing structure
+5. Integration with the existing logging and authentication framework
+
 ## Known Issues
 
 1. **Permission Dependencies**:
-   - The application requires appropriate permissions to read resources and execute moves
-   - Some environments may have role-based access control (RBAC) restrictions that limit discovery or movement
+   - The application requires appropriate permissions to read resources and execute operations
+   - Some environments may have role-based access control (RBAC) restrictions that limit discovery or operations
 
 2. **Resource Dependencies**:
    - Some Azure resources have dependencies that may prevent movement
    - Currently, the application reports errors but doesn't automatically resolve dependencies
 
-3. **Partial Moves**:
-   - If an error occurs during movement of multiple resources, there's no automatic rollback
-   - Resources that were successfully moved before an error remain moved
+3. **Partial Operations**:
+   - If an error occurs during operations on multiple resources, there's no automatic rollback
+   - Resources that were successfully processed before an error remain in the modified state
 
 4. **Limited Resource Types**:
-   - Currently only supports KeyVaults and Service Buses
+   - Resource Mover currently only supports KeyVaults and Service Buses
    - Other resource types that might be left behind are not yet handled
 
 ## What's Left to Build
@@ -98,20 +120,20 @@ The implementation includes:
    - Implement appropriate discovery methods and regex patterns for each
 
 2. **Dependency Analysis**:
-   - Add pre-move dependency analysis
+   - Add pre-operation dependency analysis
    - Implement dependency resolution or ordering
 
 3. **Parallel Processing**:
    - Implement parallel resource discovery for better performance
-   - Add parallel movement options with appropriate safeguards
+   - Add parallel operation options with appropriate safeguards
 
 4. **Rollback Mechanism**:
-   - Design and implement rollback capability for failed moves
-   - Add transaction-like behavior for multi-resource moves
+   - Design and implement rollback capability for failed operations
+   - Add transaction-like behavior for multi-resource operations
 
 5. **Enhanced Reporting**:
    - Add export options for discovered resources (e.g., CSV, JSON)
-   - Implement detailed reporting of move operations
+   - Implement detailed reporting of operations
    - Add visualization of resource relationships
 
 ## Next Immediate Steps
@@ -127,6 +149,6 @@ The implementation includes:
 - **Core Functionality**: 95% complete
 - **Error Handling**: 90% complete
 - **User Experience**: 85% complete
-- **Documentation**: 80% complete
+- **Documentation**: 85% complete
 - **Testing**: 70% complete
-- **Feature Completeness**: 60% complete (considering potential enhancements)
+- **Feature Completeness**: 65% complete (considering potential enhancements)

@@ -32,6 +32,10 @@ class Program
         // Add the update-release-agent-pools command
         var updateReleaseAgentPoolsCommand = CreateUpdateReleaseAgentPoolsCommand();
         rootCommand.AddCommand(updateReleaseAgentPoolsCommand);
+        
+        // Add the update-keyvault-access-policies command
+        var updateKeyVaultAccessPoliciesCommand = CreateUpdateKeyVaultAccessPoliciesCommand();
+        rootCommand.AddCommand(updateKeyVaultAccessPoliciesCommand);
 
         // If no arguments provided, show the interactive menu
         if (args.Length == 0)
@@ -231,6 +235,98 @@ class Program
                 Environment.ExitCode = 1;
             }
         }, subscriptionOption, sourceGroupOption, targetGroupOption, tenantIdOption, maxItemsOption, dryRunOption, verboseOption);
+
+        return command;
+    }
+    
+    /// <summary>
+    /// Creates the update-keyvault-access-policies command
+    /// </summary>
+    private static Command CreateUpdateKeyVaultAccessPoliciesCommand()
+    {
+        var command = new Command("update-keyvault-access-policies", "Update access policies in Azure Key Vaults matching a naming pattern");
+
+        // Add options
+        var subscriptionOption = new Option<string>(
+            new string[] { "--subscription-id", "-i" },
+            description: "Azure subscription ID") 
+            { IsRequired = false };
+
+        var tenantIdOption = new Option<string>(
+            new string[] { "--tenant-id", "-id" },
+            description: "Filter key vaults by specific tenant ID") 
+            { IsRequired = false };
+            
+        var objectIdOption = new Option<string>(
+            new string[] { "--object-id", "-o" },
+            description: "Entra Object ID to add to the access policy") 
+            { IsRequired = false };
+        objectIdOption.SetDefaultValue("a7351a1e-ad4a-4c4a-a4ca-bea0c51d9b2a");
+        
+        var accessLevelOption = new Option<AccessLevel>(
+            new string[] { "--access-level", "-a" },
+            description: "Access level to grant (SecretsReadOnly, SecretsReadWrite, CertificatesReadOnly, KeysReadOnly, FullAccess)") 
+            { IsRequired = false };
+        accessLevelOption.SetDefaultValue(AccessLevel.SecretsReadOnly);
+        
+        var dryRunOption = new Option<bool>(
+            new string[] { "--dry-run", "-d" },
+            description: "Run in dry run mode (no changes will be made)") 
+            { IsRequired = false };
+        dryRunOption.SetDefaultValue(false);
+
+        var verboseOption = new Option<bool>(
+            new string[] { "--verbose", "-v" },
+            description: "Enable verbose logging") 
+            { IsRequired = false };
+        verboseOption.SetDefaultValue(false);
+
+        command.AddOption(subscriptionOption);
+        command.AddOption(tenantIdOption);
+        command.AddOption(objectIdOption);
+        command.AddOption(accessLevelOption);
+        command.AddOption(dryRunOption);
+        command.AddOption(verboseOption);
+
+        // Set the handler
+        command.SetHandler(async (string subscriptionId, string tenantId, string objectId, AccessLevel accessLevel, bool dryRun, bool verbose) =>
+        {
+            // Create the logger
+            var loggerFactory = LoggerFactory.Create(builder =>
+            {
+                builder
+                    .AddConsole()
+                    .SetMinimumLevel(verbose ? LogLevel.Debug : LogLevel.Information);
+            });
+            var logger = loggerFactory.CreateLogger<Program>();
+
+            try
+            {
+                // Create command options
+                var options = new KeyVaultAccessPolicyOptions
+                {
+                    SubscriptionId = subscriptionId,
+                    TenantId = tenantId,
+                    ObjectId = objectId,
+                    AccessLevel = accessLevel,
+                    DryRun = dryRun,
+                    Verbose = verbose,
+                    ScriptType = "update-keyvault-access-policies"
+                };
+
+                // Create and run the script
+                var script = new KeyVaultAccessPolicyScript(options, logger);
+                var result = await script.RunAsync();
+
+                // Return success or failure
+                Environment.ExitCode = result.Success ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An unhandled exception occurred");
+                Environment.ExitCode = 1;
+            }
+        }, subscriptionOption, tenantIdOption, objectIdOption, accessLevelOption, dryRunOption, verboseOption);
 
         return command;
     }

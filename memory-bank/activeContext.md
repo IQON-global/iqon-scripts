@@ -2,7 +2,7 @@
 
 ## Current Focus
 
-We have developed two primary tools for Azure resource management:
+We have developed three primary tools for Azure resource management:
 
 ### 1. Azure Resource Mover
 
@@ -26,6 +26,17 @@ The script implements a solution that:
 3. Updates the Agent Pool to "Iqon Sticos VMSS 2" for all matching releases
 4. Provides detailed logging and supports dry-run mode for testing
 
+### 3. Azure Key Vault Access Policy Updater
+
+Addresses the need to add access policies to Azure Key Vaults matching a specific naming pattern. This tool allows administrators to quickly grant access to Key Vaults across multiple resource groups and tenants.
+
+The script implements a solution that:
+
+1. Discovers key vaults matching the pattern "kv-iqonsticos{tenantId}" in resource groups matching "rg-iqon-sticos(-\d+)?"
+2. Adds a specified Entra Object ID to each key vault's access policies
+3. Configures appropriate permissions based on the selected access level
+4. Provides detailed logging and supports dry-run mode for testing
+
 ## Implementation Status
 
 We've successfully implemented:
@@ -35,6 +46,7 @@ We've successfully implemented:
 - **Target Resolution**: Finding the correct resource groups for each resource
 - **Safe Movement**: Using PowerShell commands for reliable resource moves
 - **Operational Safety**: Dry-run mode and comprehensive logging
+- **Access Management**: Adding access policies to key vaults with configurable permission levels
 
 The system uses a service-oriented architecture with the following key components:
 
@@ -48,7 +60,7 @@ The application leverages:
 
 - **.NET 9**: Latest framework features and performance improvements
 - **Azure SDK**: Strongly-typed interfaces for Azure resources
-- **PowerShell Integration**: For reliable resource movement operations
+- **PowerShell Integration**: For reliable resource movement and access policy operations
 - **Regular Expressions**: For tenant ID extraction and resource matching
 - **Error Handling**: Comprehensive exception management and result reporting
 
@@ -70,16 +82,17 @@ During testing, we encountered some challenges:
 The application is functional in its current state but could benefit from:
 
 1. **Additional Resource Types**: Extending beyond KeyVaults and Service Buses to other resource types
-2. **Parallel Processing**: Implementing parallel moves for better performance with large numbers of resources
-3. **Pre-move Validation**: Adding more comprehensive validation before attempting moves
+2. **Parallel Processing**: Implementing parallel operations for better performance with large numbers of resources
+3. **Pre-operation Validation**: Adding more comprehensive validation before attempting operations
 4. **Dependency Analysis**: Automatically detecting and handling resource dependencies
-5. **Rollback Mechanism**: Implementing a rollback capability if moves partially fail
+5. **Rollback Mechanism**: Implementing a rollback capability if operations partially fail
 
 ## Decision Points
 
 Key technical decisions made:
 
-1. Using PowerShell's `Move-AzResource` command for resource movement rather than direct SDK calls
+1. Using PowerShell commands for resource operations rather than direct SDK calls
 2. Implementing a fallback to generic resource discovery to handle permission limitations
 3. Organizing resources by tenant ID for logical grouping and simplified matching
 4. Comprehensive logging at multiple levels to provide operational clarity
+5. Resource group filtering to optimize discovery and focus on relevant resources

@@ -1,6 +1,6 @@
-# Azure Resource Mover - Project Intelligence
+# Azure Resource Management Tools - Project Intelligence
 
-This file contains specific patterns, preferences, and project intelligence for the Azure Resource Mover project that help me work more effectively.
+This file contains specific patterns, preferences, and project intelligence for the Azure Resource Management Tools project that help me work more effectively.
 
 ## Naming Conventions
 
@@ -10,7 +10,12 @@ This file contains specific patterns, preferences, and project intelligence for 
    - Web App format: `app-iqon-sticos-{tenantId}` (has hyphen before tenant ID)
    - Note the inconsistency between KeyVault and other resources (missing hyphen before tenant ID in KeyVault)
 
-2. **Regex Pattern Handling**:
+2. **Resource Group Name Patterns**:
+   - Base resource group: `rg-iqon-sticos`
+   - Numbered resource groups: `rg-iqon-sticos-{number}`
+   - The regex pattern for matching these is: `^rg-iqon-sticos(-\d+)?$`
+
+3. **Regex Pattern Handling**:
    - All regex patterns use the `RegexOptions.Compiled | RegexOptions.IgnoreCase` flags for better performance and case insensitivity
    - Service Bus and Web App patterns include optional hyphens (`-?`) to handle potential naming variations
    - Tenant ID is always captured in the first regex group for consistent extraction
@@ -22,7 +27,12 @@ This file contains specific patterns, preferences, and project intelligence for 
    - LoggerService is passed to all services for consistent logging
    - Services follow a naming pattern of `{Purpose}Service` (e.g., AzureResourceService)
 
-2. **Method Organization**:
+2. **Script Pattern**:
+   - Each script is implemented as a dedicated class (e.g., `ResourceMoverScript`, `KeyVaultAccessPolicyScript`)
+   - Scripts include a RunAsync method returning a ScriptResult
+   - Scripts handle discovery, processing, and error reporting for their specific task
+
+3. **Method Organization**:
    - Public methods represent the service API
    - Private methods handle implementation details
    - Async methods use the `Async` suffix and return `Task` or `Task<T>`
@@ -55,8 +65,8 @@ This file contains specific patterns, preferences, and project intelligence for 
 ## CLI Conventions
 
 1. **Command Structure**:
-   - Commands use hyphenated-lowercase (e.g., move-resources)
-   - Flags use double hyphens (e.g., --dry-run)
+   - Commands use hyphenated-lowercase (e.g., `move-resources`, `update-keyvault-access-policies`)
+   - Flags use double hyphens (e.g., `--dry-run`)
    - Boolean flags don't require values (presence indicates true)
 
 2. **Interactive Pattern**:
@@ -80,14 +90,25 @@ This file contains specific patterns, preferences, and project intelligence for 
 ## PowerShell Integration
 
 1. **Command Execution**:
-   - Use PowerShell for resource movements rather than SDK (more reliable)
+   - Use PowerShell for resource operations rather than SDK (more reliable)
+   - Resource movement uses `Move-AzResource` command
+   - Key Vault access policy updates use `Set-AzKeyVaultAccessPolicy` command
    - Capture both standard output and standard error
    - Check exit code to determine success
    - Log the full command being executed
 
+2. **Key Vault Access Policy Permissions**:
+   - Permission parameters for access policies follow a pattern of `-PermissionsTo{ResourceType} permission1,permission2`
+   - Examples:
+     - `-PermissionsToSecrets get,list`
+     - `-PermissionsToCertificates get,list`
+     - `-PermissionsToKeys get,list`
+   - These are combined in a single command for multiple permission types
+
 ## Testing Approach
 
 1. **Testing Strategy**:
-   - Test with dry-run mode first before actual resource moves
+   - Test with dry-run mode first before actual operations
    - Use verbose logging to understand the discovery process
-   - Verify target resource groups before execution
+   - Verify resources before modifying them
+   - Run for specific tenant ID first before running for all tenants
