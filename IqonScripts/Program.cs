@@ -36,6 +36,10 @@ class Program
         // Add the update-keyvault-access-policies command
         var updateKeyVaultAccessPoliciesCommand = CreateUpdateKeyVaultAccessPoliciesCommand();
         rootCommand.AddCommand(updateKeyVaultAccessPoliciesCommand);
+        
+        // Add the list-app-service-plans command
+        var listAppServicePlansCommand = CreateListAppServicePlansCommand();
+        rootCommand.AddCommand(listAppServicePlansCommand);
 
         // If no arguments provided, show the interactive menu
         if (args.Length == 0)
@@ -327,6 +331,82 @@ class Program
                 Environment.ExitCode = 1;
             }
         }, subscriptionOption, tenantIdOption, objectIdOption, accessLevelOption, dryRunOption, verboseOption);
+
+        return command;
+    }
+    
+    /// <summary>
+    /// Creates the list-app-service-plans command
+    /// </summary>
+    private static Command CreateListAppServicePlansCommand()
+    {
+        var command = new Command("list-app-service-plans", "List App Service Plans with their app count and resource group");
+
+        // Add options
+        var subscriptionOption = new Option<string>(
+            new string[] { "--subscription-id", "-i" },
+            description: "Azure subscription ID") 
+            { IsRequired = false };
+
+        var resourceGroupFilterOption = new Option<string>(
+            new string[] { "--resource-group-filter", "-f" },
+            description: "Pattern to filter resource groups") 
+            { IsRequired = false };
+        resourceGroupFilterOption.SetDefaultValue("rg-iqon-sticos");
+            
+        var tenantIdOption = new Option<string>(
+            new string[] { "--tenant-id", "-id" },
+            description: "Filter by specific tenant ID") 
+            { IsRequired = false };
+        
+        var verboseOption = new Option<bool>(
+            new string[] { "--verbose", "-v" },
+            description: "Enable verbose logging") 
+            { IsRequired = false };
+        verboseOption.SetDefaultValue(false);
+
+        command.AddOption(subscriptionOption);
+        command.AddOption(resourceGroupFilterOption);
+        command.AddOption(tenantIdOption);
+        command.AddOption(verboseOption);
+
+        // Set the handler
+        command.SetHandler(async (string subscriptionId, string resourceGroupFilter, string tenantId, bool verbose) =>
+        {
+            // Create the logger
+            var loggerFactory = LoggerFactory.Create(builder =>
+            {
+                builder
+                    .AddConsole()
+                    .SetMinimumLevel(verbose ? LogLevel.Debug : LogLevel.Information);
+            });
+            var logger = loggerFactory.CreateLogger<Program>();
+
+            try
+            {
+                // Create command options
+                var options = new AppServicePlanListOptions
+                {
+                    SubscriptionId = subscriptionId,
+                    ResourceGroupFilter = resourceGroupFilter,
+                    TenantId = tenantId,
+                    Verbose = verbose,
+                    ScriptType = "list-app-service-plans"
+                };
+
+                // Create and run the script
+                var script = new AppServicePlanListScript(options, logger);
+                var result = await script.RunAsync();
+
+                // Return success or failure
+                Environment.ExitCode = result.Success ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An unhandled exception occurred");
+                Environment.ExitCode = 1;
+            }
+        }, subscriptionOption, resourceGroupFilterOption, tenantIdOption, verboseOption);
 
         return command;
     }
