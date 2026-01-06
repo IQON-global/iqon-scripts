@@ -41,6 +41,10 @@ class Program
         var listAppServicePlansCommand = CreateListAppServicePlansCommand();
         rootCommand.AddCommand(listAppServicePlansCommand);
 
+        // Add the list-failed-releases command
+        var listFailedReleasesCommand = CreateListFailedReleasesCommand();
+        rootCommand.AddCommand(listFailedReleasesCommand);
+
         // If no arguments provided, show the interactive menu
         if (args.Length == 0)
         {
@@ -407,6 +411,97 @@ class Program
                 Environment.ExitCode = 1;
             }
         }, subscriptionOption, resourceGroupFilterOption, tenantIdOption, verboseOption);
+
+        return command;
+    }
+
+    /// <summary>
+    /// Creates the list-failed-releases command
+    /// </summary>
+    private static Command CreateListFailedReleasesCommand()
+    {
+        var command = new Command("list-failed-releases", "List failed releases from Azure DevOps matching the iqon-sticos-* pattern");
+
+        // Add options
+        var subscriptionOption = new Option<string>(
+            new string[] { "--subscription-id", "-i" },
+            description: "Azure subscription ID")
+            { IsRequired = false };
+
+        var tenantIdOption = new Option<string>(
+            new string[] { "--tenant-id", "-id" },
+            description: "Filter releases by specific tenant ID (from release name)")
+            { IsRequired = false };
+
+        var startDateOption = new Option<DateTime>(
+            new string[] { "--start-date", "-s" },
+            description: "Start date for the time range (default: 7 days ago)")
+            { IsRequired = false };
+        startDateOption.SetDefaultValue(DateTime.UtcNow.AddDays(-7));
+
+        var endDateOption = new Option<DateTime>(
+            new string[] { "--end-date", "-e" },
+            description: "End date for the time range (default: now)")
+            { IsRequired = false };
+        endDateOption.SetDefaultValue(DateTime.UtcNow);
+
+        var patOption = new Option<string>(
+            new string[] { "--pat", "-p" },
+            description: "Personal Access Token (PAT) for Azure DevOps authentication")
+            { IsRequired = false };
+
+        var verboseOption = new Option<bool>(
+            new string[] { "--verbose", "-v" },
+            description: "Enable verbose logging")
+            { IsRequired = false };
+        verboseOption.SetDefaultValue(false);
+
+        command.AddOption(subscriptionOption);
+        command.AddOption(tenantIdOption);
+        command.AddOption(startDateOption);
+        command.AddOption(endDateOption);
+        command.AddOption(patOption);
+        command.AddOption(verboseOption);
+
+        // Set the handler
+        command.SetHandler(async (string subscriptionId, string tenantId, DateTime startDate, DateTime endDate, string pat, bool verbose) =>
+        {
+            // Create the logger
+            var loggerFactory = LoggerFactory.Create(builder =>
+            {
+                builder
+                    .AddConsole()
+                    .SetMinimumLevel(verbose ? LogLevel.Debug : LogLevel.Information);
+            });
+            var logger = loggerFactory.CreateLogger<Program>();
+
+            try
+            {
+                // Create command options
+                var options = new ListFailedReleasesOptions
+                {
+                    SubscriptionId = subscriptionId,
+                    TenantId = tenantId,
+                    StartDate = startDate,
+                    EndDate = endDate,
+                    Pat = pat,
+                    Verbose = verbose,
+                    ScriptType = "list-failed-releases"
+                };
+
+                // Create and run the script
+                var script = new ListFailedReleasesScript(options, logger);
+                var result = await script.RunAsync();
+
+                // Return success or failure
+                Environment.ExitCode = result.Success ? 0 : 1;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "An unhandled exception occurred");
+                Environment.ExitCode = 1;
+            }
+        }, subscriptionOption, tenantIdOption, startDateOption, endDateOption, patOption, verboseOption);
 
         return command;
     }

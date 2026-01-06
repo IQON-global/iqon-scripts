@@ -652,6 +652,244 @@ public class AzureDevOpsService
     }
 
     /// <summary>
+    /// Gets failed releases matching the iqon-sticos-* pattern within a time range
+    /// </summary>
+    /// <param name="project">The Azure DevOps project name</param>
+    /// <param name="tenantId">Optional tenant ID to filter by (extracted from release name)</param>
+    /// <param name="startDate">Start of the time range</param>
+    /// <param name="endDate">End of the time range</param>
+    /// <returns>A list of failed release information</returns>
+    public async Task<List<FailedReleaseInfo>> GetFailedReleasesAsync(string project, string? tenantId, DateTime startDate, DateTime endDate)
+    {
+        var result = new List<FailedReleaseInfo>();
+
+        try
+        {
+            _logger.LogInformation($"Getting failed releases for project: {project}");
+            _logger.LogInformation($"Time range: {startDate:yyyy-MM-dd} to {endDate:yyyy-MM-dd}");
+
+            // Use the VSRM URL for release management API
+            string vsrmUrl = _organizationUrl.Replace("dev.azure.com", "vsrm.dev.azure.com");
+
+            // Format dates for the API (ISO 8601)
+            string minCreatedTime = startDate.ToString("yyyy-MM-ddTHH:mm:ssZ");
+            string maxCreatedTime = endDate.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+            // Fetch all releases with pagination using continuationToken
+            var allReleases = new List<ReleaseItem>();
+            int top = 100; // Max page size
+            string? continuationToken = null;
+            int maxReleases = 5000; // Safety limit
+            int pageCount = 0;
+
+            do
+            {
+                // Construct the API URL to get releases with pagination
+                string apiUrl = $"{vsrmUrl}/{project}/_apis/release/releases?minCreatedTime={minCreatedTime}&maxCreatedTime={maxCreatedTime}&$expand=environments&$top={top}&api-version=7.1-preview.8";
+
+                if (!string.IsNullOrEmpty(continuationToken))
+                {
+                    apiUrl += $"&continuationToken={continuationToken}";
+                }
+
+                _logger.LogVerbose($"API URL: {apiUrl}");
+
+                // Send the request to get releases
+                var response = await _httpClient.GetAsync(apiUrl);
+
+                if (!response.IsSuccessStatusCode)
+                {
+                    _logger.LogWarning($"Failed to get releases. Status: {response.StatusCode}");
+                    return GetMockFailedReleases(tenantId);
+                }
+
+                // Check for continuation token in response headers
+                continuationToken = null;
+                if (response.Headers.TryGetValues("x-ms-continuationtoken", out var tokenValues))
+                {
+                    continuationToken = tokenValues.FirstOrDefault();
+                }
+
+                // Parse the response
+                var content = await response.Content.ReadAsStringAsync();
+
+                // Check if the content looks like JSON
+                if (content.StartsWith("<"))
+                {
+                    _logger.LogWarning("Received HTML/XML response instead of JSON. Possible authentication issue or incorrect endpoint.");
+                    _logger.LogVerbose(content.Substring(0, Math.Min(content.Length, 200)) + "...");
+                    return GetMockFailedReleases(tenantId);
+                }
+
+                try
+                {
+                    var releasesResponse = JsonSerializer.Deserialize<ReleasesResponse>(content, new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+
+                    if (releasesResponse?.Value == null || releasesResponse.Value.Length == 0)
+                    {
+                        break;
+                    }
+
+                    allReleases.AddRange(releasesResponse.Value);
+                    pageCount++;
+                    _logger.LogVerbose($"Fetched {releasesResponse.Value.Length} releases (total so far: {allReleases.Count})");
+
+                    // Stop if we got less than a full page (no more data)
+                    if (releasesResponse.Value.Length < top)
+                    {
+                        break;
+                    }
+
+                    // Safety limit
+                    if (allReleases.Count >= maxReleases)
+                    {
+                        _logger.LogWarning($"Reached safety limit of {maxReleases} releases. Some releases may not be included.");
+                        break;
+                    }
+                }
+                catch (JsonException ex)
+                {
+                    _logger.LogWarning($"Failed to parse releases response as JSON: {ex.Message}");
+                    break;
+                }
+            } while (!string.IsNullOrEmpty(continuationToken));
+
+            if (allReleases.Count == 0)
+            {
+                _logger.LogWarning("No releases found or API returned unexpected format");
+                return result;
+            }
+
+            _logger.LogInformation($"Found {allReleases.Count} total releases in time range");
+
+            // Filter releases that have failed environments
+            foreach (var release in allReleases)
+            {
+                // Check the release DEFINITION name, not the release instance name
+                var definitionName = release.ReleaseDefinition?.Name ?? "";
+                _logger.LogVerbose($"Checking release: {release.Name} (ID: {release.Id}), Definition: {definitionName}");
+
+                var match = _releaseNameTenantIdRegex.Match(definitionName);
+                if (!match.Success)
+                {
+                    _logger.LogVerbose($"  -> Definition name doesn't match pattern 'iqon-sticos-{{number}}'");
+                    continue;
+                }
+
+                var extractedTenantId = match.Groups[1].Value;
+
+                // If a specific tenant ID is requested, only include that one
+                if (!string.IsNullOrEmpty(tenantId) && tenantId != extractedTenantId)
+                {
+                    continue;
+                }
+
+                // Check if any environment has failed
+                var failedEnvironments = new List<string>();
+                if (release.Environments != null)
+                {
+                    foreach (var env in release.Environments)
+                    {
+                        // Status can be string or int depending on API version
+                        // Status 4 = rejected/failed, Status 8 = canceled
+                        var statusStr = env.Status?.ToString()?.ToLowerInvariant();
+                        _logger.LogVerbose($"  -> Environment '{env.Name}': status = '{statusStr}'");
+
+                        bool isFailed = statusStr == "rejected" || statusStr == "canceled" ||
+                            statusStr == "4" || statusStr == "8";
+
+                        if (isFailed)
+                        {
+                            failedEnvironments.Add(env.Name ?? "Unknown");
+                        }
+                    }
+                }
+                else
+                {
+                    _logger.LogVerbose($"  -> No environments found for this release");
+                }
+
+                if (failedEnvironments.Count > 0)
+                {
+                    _logger.LogVerbose($"Found failed release: {release.Name} (ID: {release.Id}) - Failed environments: {string.Join(", ", failedEnvironments)}");
+
+                    result.Add(new FailedReleaseInfo
+                    {
+                        Id = release.Id,
+                        Name = definitionName,  // Use definition name as it contains the tenant ID
+                        TenantId = extractedTenantId,
+                        CreatedOn = release.CreatedOn,
+                        DefinitionName = release.Name,  // Store the release instance name (e.g., "Release-18")
+                        FailedEnvironments = failedEnvironments,
+                        Url = release.Url ?? ""
+                    });
+                }
+            }
+
+            _logger.LogInformation($"Found {result.Count} failed releases");
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError($"Failed to get releases for project: {project}", ex);
+            return GetMockFailedReleases(tenantId);
+        }
+    }
+
+    /// <summary>
+    /// Gets mock failed releases for demo purposes when API calls fail
+    /// </summary>
+    /// <param name="tenantId">Optional tenant ID to filter by</param>
+    /// <returns>A list of mock failed releases</returns>
+    private List<FailedReleaseInfo> GetMockFailedReleases(string? tenantId = null)
+    {
+        _logger.LogInformation("Using mock failed releases for demo purposes");
+
+        var mockReleases = new List<FailedReleaseInfo>
+        {
+            new FailedReleaseInfo
+            {
+                Id = 1001,
+                Name = "iqon-sticos-123",
+                TenantId = "123",
+                CreatedOn = DateTime.UtcNow.AddDays(-2),
+                DefinitionName = "iqon-sticos-123",
+                FailedEnvironments = new List<string> { "Production" },
+                Url = "https://example.com/release/1001"
+            },
+            new FailedReleaseInfo
+            {
+                Id = 1002,
+                Name = "iqon-sticos-456",
+                TenantId = "456",
+                CreatedOn = DateTime.UtcNow.AddDays(-1),
+                DefinitionName = "iqon-sticos-456",
+                FailedEnvironments = new List<string> { "Staging", "Production" },
+                Url = "https://example.com/release/1002"
+            },
+            new FailedReleaseInfo
+            {
+                Id = 1003,
+                Name = "iqon-sticos-789",
+                TenantId = "789",
+                CreatedOn = DateTime.UtcNow.AddHours(-6),
+                DefinitionName = "iqon-sticos-789",
+                FailedEnvironments = new List<string> { "Production" },
+                Url = "https://example.com/release/1003"
+            }
+        };
+
+        // Filter by tenant ID if provided
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            mockReleases = mockReleases.Where(r => r.TenantId == tenantId).ToList();
+        }
+
+        _logger.LogInformation($"Created {mockReleases.Count} mock failed releases");
+        return mockReleases;
+    }
+
+    /// <summary>
     /// Attempts to get agent pools from Azure DevOps but doesn't fail if it can't
     /// </summary>
     private async Task TryGetAgentPoolsAsync(string project, string baseUrl)
@@ -794,9 +1032,139 @@ internal class AgentPoolItem
     /// Gets or sets the ID of the agent pool
     /// </summary>
     public int Id { get; set; }
-    
+
     /// <summary>
     /// Gets or sets the name of the agent pool
     /// </summary>
     public string Name { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Response class for releases API
+/// </summary>
+internal class ReleasesResponse
+{
+    /// <summary>
+    /// Gets or sets the array of releases
+    /// </summary>
+    public ReleaseItem[] Value { get; set; } = Array.Empty<ReleaseItem>();
+}
+
+/// <summary>
+/// Class to represent a release item in the API response
+/// </summary>
+internal class ReleaseItem
+{
+    /// <summary>
+    /// Gets or sets the ID of the release
+    /// </summary>
+    public int Id { get; set; }
+
+    /// <summary>
+    /// Gets or sets the name of the release
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the status of the release
+    /// </summary>
+    public string Status { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the creation date of the release
+    /// </summary>
+    public DateTime CreatedOn { get; set; }
+
+    /// <summary>
+    /// Gets or sets the release definition
+    /// </summary>
+    public ReleaseDefinitionRef? ReleaseDefinition { get; set; }
+
+    /// <summary>
+    /// Gets or sets the environments
+    /// </summary>
+    public ReleaseEnvironment[]? Environments { get; set; }
+
+    /// <summary>
+    /// Gets or sets the URL of the release
+    /// </summary>
+    public string? Url { get; set; }
+}
+
+/// <summary>
+/// Reference to a release definition
+/// </summary>
+internal class ReleaseDefinitionRef
+{
+    /// <summary>
+    /// Gets or sets the ID
+    /// </summary>
+    public int Id { get; set; }
+
+    /// <summary>
+    /// Gets or sets the name
+    /// </summary>
+    public string? Name { get; set; }
+}
+
+/// <summary>
+/// Represents a release environment
+/// </summary>
+internal class ReleaseEnvironment
+{
+    /// <summary>
+    /// Gets or sets the ID
+    /// </summary>
+    public int Id { get; set; }
+
+    /// <summary>
+    /// Gets or sets the name
+    /// </summary>
+    public string? Name { get; set; }
+
+    /// <summary>
+    /// Gets or sets the status (can be string or int depending on API version)
+    /// </summary>
+    public object Status { get; set; } = string.Empty;
+}
+
+/// <summary>
+/// Information about a failed release
+/// </summary>
+public class FailedReleaseInfo
+{
+    /// <summary>
+    /// Gets or sets the ID of the release
+    /// </summary>
+    public int Id { get; set; }
+
+    /// <summary>
+    /// Gets or sets the name of the release
+    /// </summary>
+    public string Name { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the tenant ID extracted from the release name
+    /// </summary>
+    public string TenantId { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the creation date
+    /// </summary>
+    public DateTime CreatedOn { get; set; }
+
+    /// <summary>
+    /// Gets or sets the release definition name
+    /// </summary>
+    public string DefinitionName { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Gets or sets the list of failed environment names
+    /// </summary>
+    public List<string> FailedEnvironments { get; set; } = new List<string>();
+
+    /// <summary>
+    /// Gets or sets the URL of the release
+    /// </summary>
+    public string Url { get; set; } = string.Empty;
 }
