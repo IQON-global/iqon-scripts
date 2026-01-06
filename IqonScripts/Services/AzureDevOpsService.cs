@@ -762,7 +762,10 @@ public class AzureDevOpsService
 
             _logger.LogInformation($"Found {allReleases.Count} total releases in time range");
 
-            // Filter releases that have failed environments
+            // Track all releases per tenant (both failed and succeeded)
+            var releasesByTenant = new Dictionary<string, List<(ReleaseItem Release, bool IsFailed, List<string> FailedEnvironments)>>();
+
+            // First pass: categorize all releases by tenant
             foreach (var release in allReleases)
             {
                 // Check the release DEFINITION name, not the release instance name
@@ -784,49 +787,90 @@ public class AzureDevOpsService
                     continue;
                 }
 
-                // Check if any environment has failed
+                // Check environment statuses
                 var failedEnvironments = new List<string>();
+                bool hasSucceeded = false;
+
                 if (release.Environments != null)
                 {
                     foreach (var env in release.Environments)
                     {
                         // Status can be string or int depending on API version
-                        // Status 4 = rejected/failed, Status 8 = canceled
                         var statusStr = env.Status?.ToString()?.ToLowerInvariant();
                         _logger.LogVerbose($"  -> Environment '{env.Name}': status = '{statusStr}'");
 
+                        // Check for failed statuses: 4 = rejected/failed, 8 = canceled
                         bool isFailed = statusStr == "rejected" || statusStr == "canceled" ||
                             statusStr == "4" || statusStr == "8";
+
+                        // Check for succeeded status: 4 can also mean succeeded in some contexts,
+                        // but "succeeded" string is clearer
+                        bool isSucceeded = statusStr == "succeeded" || statusStr == "4" || statusStr == "partiallysucceeded";
 
                         if (isFailed)
                         {
                             failedEnvironments.Add(env.Name ?? "Unknown");
                         }
+                        if (isSucceeded)
+                        {
+                            hasSucceeded = true;
+                        }
                     }
                 }
-                else
+
+                // Add to tracking dictionary
+                if (!releasesByTenant.ContainsKey(extractedTenantId))
                 {
-                    _logger.LogVerbose($"  -> No environments found for this release");
+                    releasesByTenant[extractedTenantId] = new List<(ReleaseItem, bool, List<string>)>();
                 }
 
-                if (failedEnvironments.Count > 0)
-                {
-                    _logger.LogVerbose($"Found failed release: {release.Name} (ID: {release.Id}) - Failed environments: {string.Join(", ", failedEnvironments)}");
+                bool releaseFailed = failedEnvironments.Count > 0;
+                releasesByTenant[extractedTenantId].Add((release, releaseFailed, failedEnvironments));
 
-                    result.Add(new FailedReleaseInfo
-                    {
-                        Id = release.Id,
-                        Name = definitionName,  // Use definition name as it contains the tenant ID
-                        TenantId = extractedTenantId,
-                        CreatedOn = release.CreatedOn,
-                        DefinitionName = release.Name,  // Store the release instance name (e.g., "Release-18")
-                        FailedEnvironments = failedEnvironments,
-                        Url = release.Url ?? ""
-                    });
+                if (releaseFailed)
+                {
+                    _logger.LogVerbose($"  -> FAILED: {string.Join(", ", failedEnvironments)}");
+                }
+                else if (hasSucceeded)
+                {
+                    _logger.LogVerbose($"  -> SUCCEEDED");
                 }
             }
 
-            _logger.LogInformation($"Found {result.Count} failed releases");
+            // Second pass: for each tenant, check if their most recent release succeeded
+            // If so, exclude them from the failed list
+            foreach (var kvp in releasesByTenant)
+            {
+                var tenantReleases = kvp.Value.OrderByDescending(r => r.Release.CreatedOn).ToList();
+                var mostRecent = tenantReleases.First();
+
+                if (!mostRecent.IsFailed)
+                {
+                    // Most recent release succeeded, skip this tenant
+                    _logger.LogVerbose($"Tenant {kvp.Key}: Most recent release succeeded, excluding from failed list");
+                    continue;
+                }
+
+                // Find the most recent failed release to report
+                var mostRecentFailed = tenantReleases.First(r => r.IsFailed);
+                var release = mostRecentFailed.Release;
+                var definitionName = release.ReleaseDefinition?.Name ?? "";
+
+                _logger.LogVerbose($"Tenant {kvp.Key}: Most recent release FAILED, including in results");
+
+                result.Add(new FailedReleaseInfo
+                {
+                    Id = release.Id,
+                    Name = definitionName,  // Use definition name as it contains the tenant ID
+                    TenantId = kvp.Key,
+                    CreatedOn = release.CreatedOn,
+                    DefinitionName = release.Name,  // Store the release instance name (e.g., "Release-18")
+                    FailedEnvironments = mostRecentFailed.FailedEnvironments,
+                    Url = release.Url ?? ""
+                });
+            }
+
+            _logger.LogInformation($"Found {result.Count} failed releases (after filtering out successful re-runs)");
             return result;
         }
         catch (Exception ex)

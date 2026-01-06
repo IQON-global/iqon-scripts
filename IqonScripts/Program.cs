@@ -435,13 +435,13 @@ class Program
 
         var startDateOption = new Option<DateTime>(
             new string[] { "--start-date", "-s" },
-            description: "Start date for the time range (default: 7 days ago)")
+            description: "Start date/time for the time range (e.g., '2025-01-05' or '2025-01-05 14:30'). Default: 7 days ago")
             { IsRequired = false };
         startDateOption.SetDefaultValue(DateTime.UtcNow.AddDays(-7));
 
         var endDateOption = new Option<DateTime>(
             new string[] { "--end-date", "-e" },
-            description: "End date for the time range (default: now)")
+            description: "End date/time for the time range (e.g., '2025-01-06' or '2025-01-06 09:00'). Default: now")
             { IsRequired = false };
         endDateOption.SetDefaultValue(DateTime.UtcNow);
 
