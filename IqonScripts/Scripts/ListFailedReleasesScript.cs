@@ -65,7 +65,7 @@ public class ListFailedReleasesScript
             {
                 await devOpsService.InitializeAsync(accessToken);
             }
-
+            
             // Get failed releases
             _logger.LogInformation($"Searching for failed releases...");
             if (!string.IsNullOrEmpty(_options.TenantId))
